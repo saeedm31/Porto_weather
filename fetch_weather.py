@@ -1,92 +1,105 @@
-import requests
-import psycopg2
-import psycopg2.extras
-import os
+"""Download daily min/max temperatures from Open-Meteo and store them in PostgreSQL.
+
+First run: backfills everything from BACKFILL_START (default 1991) to yesterday.
+Later runs: re-fetch the last 7 days (late corrections) up to yesterday, and fill
+any missing early years if BACKFILL_START was moved back.
+Safe to run as often as you like: rows are upserted by date.
+"""
+
+from contextlib import closing
 from datetime import date, timedelta
-from dotenv import load_dotenv
 
-load_dotenv()
+import requests
 
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_PORT = int(os.environ.get("DB_PORT", 5432))
-DB_NAME = os.environ.get("DB_NAME", "postgres")
-DB_USER = os.environ.get("DB_USER", "postgres")
-DB_PASS = os.environ.get("DB_PASS", "")
+from db import BACKFILL_START, CITY_LAT, CITY_LON, TABLE, TIMEZONE, get_conn, query
 
-CITY_LAT = float(os.environ.get("CITY_LAT", 41.15))
-CITY_LON = float(os.environ.get("CITY_LON", -8.61))
-BACKFILL_START = "2023-01-01"
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+CHUNK_DAYS = 365 * 5   # keep each API request to about five years
+REFRESH_DAYS = 7       # re-fetch the last week to pick up late corrections
 
-def get_conn():
-    return psycopg2.connect(
-        host=DB_HOST, port=DB_PORT,
-        dbname=DB_NAME, user=DB_USER, password=DB_PASS
-    )
 
-def fetch_weather(start_date: str, end_date: str):
-    """Fetch daily min/max temps from Open-Meteo (free, no API key)."""
-    url = "https://archive-api.open-meteo.com/v1/archive"
+def fetch_weather(start, end):
+    """Return [(date_str, temp_max, temp_min), ...] for start..end inclusive."""
     params = {
         "latitude": CITY_LAT,
         "longitude": CITY_LON,
-        "start_date": start_date,
-        "end_date": end_date,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
         "daily": "temperature_2m_max,temperature_2m_min",
-        "timezone": "Europe/Lisbon"
+        "timezone": TIMEZONE,
     }
-    r = requests.get(url, params=params, timeout=30)
+    r = requests.get(ARCHIVE_URL, params=params, timeout=60)
     r.raise_for_status()
-    data = r.json()["daily"]
-    records = []
-    for d, tmax, tmin in zip(data["time"], data["temperature_2m_max"], data["temperature_2m_min"]):
-        if tmax is not None and tmin is not None:
-            records.append((d, tmax, tmin))
-    return records
+    return parse_daily(r.json())
+
+
+def parse_daily(payload):
+    """Turn an Open-Meteo response into rows, skipping days with missing values."""
+    daily = payload["daily"]
+    return [
+        (d, tmax, tmin)
+        for d, tmax, tmin in zip(daily["time"], daily["temperature_2m_max"], daily["temperature_2m_min"])
+        if tmax is not None and tmin is not None
+    ]
+
+
+def plan_ranges(first, last, backfill_start, yesterday):
+    """Work out which date ranges to download, given what's already stored.
+
+    first/last are the earliest/latest dates in the database (None if empty).
+    """
+    if first is None:
+        ranges = [(backfill_start, yesterday)]
+    else:
+        ranges = []
+        if first > backfill_start:
+            ranges.append((backfill_start, first - timedelta(days=1)))
+        ranges.append((max(last - timedelta(days=REFRESH_DAYS), first), yesterday))
+    return [(s, e) for s, e in ranges if s <= e]
+
+
+def chunks(start, end, size=CHUNK_DAYS):
+    """Split start..end into consecutive ranges of at most `size` days."""
+    while start <= end:
+        stop = min(start + timedelta(days=size - 1), end)
+        yield start, stop
+        start = stop + timedelta(days=1)
+
 
 def upsert_records(records):
-    conn = get_conn()
-    cur = conn.cursor()
-    psycopg2.extras.execute_values(cur, """
-        INSERT INTO porto_weather (date, temp_max, temp_min)
-        VALUES %s
-        ON CONFLICT (date) DO UPDATE
-        SET temp_max = EXCLUDED.temp_max,
-            temp_min = EXCLUDED.temp_min,
-            fetched_at = NOW()
-    """, [(r[0], r[1], r[2]) for r in records])
-    conn.commit()
-    cur.close()
-    conn.close()
+    import psycopg2.extras
 
-def get_last_date():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT MAX(date) FROM porto_weather")
-    result = cur.fetchone()[0]
-    cur.close()
-    conn.close()
-    return result
+    with closing(get_conn()) as conn, closing(conn.cursor()) as cur:
+        psycopg2.extras.execute_values(cur, f"""
+            INSERT INTO {TABLE} (date, temp_max, temp_min)
+            VALUES %s
+            ON CONFLICT (date) DO UPDATE
+            SET temp_max = EXCLUDED.temp_max,
+                temp_min = EXCLUDED.temp_min,
+                fetched_at = NOW()
+        """, records)
+        conn.commit()
+
 
 def main():
-    last = get_last_date()
-    if last is None:
-        start = BACKFILL_START
-        print(f"🌍 Backfilling from {start}...")
-    else:
-        # Go back 7 days to catch any late-arriving data
-        start = (last - timedelta(days=7)).strftime("%Y-%m-%d")
-        print(f"🔄 Updating from {start}...")
+    first, last = query(f"SELECT MIN(date), MAX(date) FROM {TABLE}")[0]
+    yesterday = date.today() - timedelta(days=1)   # the archive lags about a day behind
+    ranges = plan_ranges(first, last, date.fromisoformat(BACKFILL_START), yesterday)
 
-    # Open-Meteo archive has ~1 day delay
-    end = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-
-    if start > end:
+    if not ranges:
         print("✅ Already up to date.")
         return
 
-    records = fetch_weather(start, end)
-    upsert_records(records)
-    print(f"✅ Upserted {len(records)} records ({start} → {end})")
+    total = 0
+    for start, end in ranges:
+        for chunk_start, chunk_end in chunks(start, end):
+            records = fetch_weather(chunk_start, chunk_end)
+            if records:
+                upsert_records(records)
+            total += len(records)
+            print(f"🔄 {chunk_start} → {chunk_end}: {len(records)} days")
+    print(f"✅ Upserted {total} days in total.")
+
 
 if __name__ == "__main__":
     main()

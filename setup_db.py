@@ -1,36 +1,23 @@
-import psycopg2
-import os
-from dotenv import load_dotenv
+"""Create the weather table if it doesn't exist yet."""
 
-load_dotenv()
+from contextlib import closing
 
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_PORT = int(os.environ.get("DB_PORT", 5432))
-DB_NAME = os.environ.get("DB_NAME", "postgres")
-DB_USER = os.environ.get("DB_USER", "postgres")
-DB_PASS = os.environ.get("DB_PASS", "")
+from db import TABLE, get_conn
 
-def get_conn():
-    return psycopg2.connect(
-        host=DB_HOST, port=DB_PORT,
-        dbname=DB_NAME, user=DB_USER, password=DB_PASS
-    )
 
 def setup():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS porto_weather (
-            date        DATE PRIMARY KEY,
-            temp_max    FLOAT,
-            temp_min    FLOAT,
-            fetched_at  TIMESTAMP DEFAULT NOW()
-        );
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
-    print("✅ Table porto_weather is ready.")
+    with closing(get_conn()) as conn, closing(conn.cursor()) as cur:
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {TABLE} (
+                date        DATE PRIMARY KEY,
+                temp_max    FLOAT,
+                temp_min    FLOAT,
+                fetched_at  TIMESTAMP DEFAULT NOW()
+            );
+        """)
+        conn.commit()
+    print(f"✅ Table {TABLE} is ready.")
+
 
 if __name__ == "__main__":
     setup()

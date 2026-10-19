@@ -1,13 +1,13 @@
 #!/bin/bash
-# Start the Porto weather dashboard on port 5000
+# Start the dashboard with gunicorn (production web server).
+# Settings come from .env; HOST/PORT default to 0.0.0.0:5000.
 cd "$(dirname "$0")"
 
-# Load environment variables if .env exists
-if [ -f .env ]; then
-  set -a
-  source .env
-  set +a
-fi
+PY=python3
+[ -x venv/bin/python ] && PY=venv/bin/python
 
-echo "🚀 Starting Porto Weather Dashboard on http://127.0.0.1:5000"
-python3 dashboard.py
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-5000}"
+
+echo "🚀 Starting weather dashboard on http://$HOST:$PORT"
+exec "$PY" -m gunicorn --workers 2 --bind "$HOST:$PORT" --access-logfile - dashboard:app

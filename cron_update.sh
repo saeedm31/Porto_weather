@@ -1,14 +1,13 @@
 #!/bin/bash
-# Daily cron updater for Porto weather data
-# Runs: fetch_weather.py (upserts last 7 days)
-
+# Daily update, meant for cron. Fetches the latest days into the database.
+# Uses the project's virtual environment if there is one, and logs to ./logs/fetch.log.
 cd "$(dirname "$0")"
 
-# Load environment variables if .env exists
-if [ -f .env ]; then
-  set -a
-  source .env
-  set +a
-fi
+PY=python3
+[ -x venv/bin/python ] && PY=venv/bin/python
 
-/usr/bin/python3 fetch_weather.py >> /var/log/porto-weather.log 2>&1
+mkdir -p logs
+{
+  echo "--- $(date '+%Y-%m-%d %H:%M:%S')"
+  "$PY" fetch_weather.py
+} >> logs/fetch.log 2>&1

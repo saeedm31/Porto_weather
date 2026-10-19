@@ -1,0 +1,22 @@
+# systemd service: keeps the dashboard running and restarts it after a crash or reboot.
+#
+# Install on the server (adjust the paths if you cloned somewhere else):
+#   sudo cp deploy/weather-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now weather-dashboard
+#   sudo systemctl status weather-dashboard
+
+[Unit]
+Description=Weather climate dashboard (gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Porto_weather
+ExecStart=/bin/bash /home/ubuntu/Porto_weather/run_dashboard.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
