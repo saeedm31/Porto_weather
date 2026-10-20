@@ -6,6 +6,7 @@
 [![Flask](https://img.shields.io/badge/Web-Flask-000000?logo=flask)](https://flask.palletsprojects.com/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Docker](https://img.shields.io/badge/Deploy-Docker%20Compose-2496ED?logo=docker&logoColor=white)](#-option-1-docker-compose-any-server)
+[![Tests](https://github.com/saeedm31/Porto_weather/actions/workflows/tests.yml/badge.svg)](https://github.com/saeedm31/Porto_weather/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 Set up for Porto, Portugal by default, and works for any city: change four settings and redeploy.
@@ -140,7 +141,7 @@ Use a fresh database or set `WEATHER_TABLE` to a new table name, so the two citi
 python -m unittest
 ```
 
-18 tests cover the climate analysis (normals, anomalies for partial years, trend detection, missing data) and the fetch planning (backfill, daily refresh, filling early years for an existing database).
+They run on every push (GitHub Actions). 18 tests cover the climate analysis (normals, anomalies for partial years, trend detection, missing data) and the fetch planning (backfill, daily refresh, filling early years for an existing database).
 
 ## 🗺️ Ideas
 
