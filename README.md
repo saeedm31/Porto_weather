@@ -28,6 +28,10 @@ A weather app tells you today's temperature. This dashboard tells you **what it 
 
 The "normal" is the **1991–2020 average** for each calendar day, the current World Meteorological Organization standard. The daily averages are smoothed over a 31-day window.
 
+![Porto: last 12 months against the normal range, and every year since 1991 with the warming trend](docs/climate.svg)
+
+Real data for Porto: it has warmed about 0.2 °C per decade since 1991, and 2026 so far is running 1.25 °C above normal. Redraw the chart from your own database with `python plot_climate.py`.
+
 ## 🧠 How it works
 
 ```
@@ -42,6 +46,7 @@ Open-Meteo archive API ──► fetch_weather.py ──► PostgreSQL ──►
 | `dashboard.py` | Flask app with a JSON API and the dashboard page. Results are cached for 10 minutes. |
 | `db.py` | Settings (from `.env`) and database helpers, shared by everything else. |
 | `setup_db.py` | Creates the table. |
+| `plot_climate.py` | Draws the README chart (`docs/climate.svg`) from your database, using the same analysis as the dashboard. |
 
 **API**
 
